@@ -59,6 +59,12 @@ type Options struct {
 	SkipAuthPreflight     bool     `flag:"skip-auth-preflight" cfg:"skip_auth_preflight"`
 	ForceJSONErrors       bool     `flag:"force-json-errors" cfg:"force_json_errors"`
 
+	//TODO: legacy backward compatibility - remove once migration to sso-v3 is done
+	TokenValidationKey      string   `flag:"token-validation-key" cfg:"token_validation_key"`
+	TokenValidationAuthData string   `flag:"token-validation-auth-data" cfg:"token_validation_auth_data"`
+	TokenValidationRegex    []string `flag:"token-validation-regex" cfg:"token_validation_regex"`
+	//TODO: legacy backward compatibility - remove once migration to sso-v3 is done
+
 	SignatureKey    string `flag:"signature-key" cfg:"signature_key"`
 	GCPHealthChecks bool   `flag:"gcp-healthchecks" cfg:"gcp_healthchecks"`
 
@@ -122,6 +128,12 @@ func NewFlagSet() *pflag.FlagSet {
 	flagSet.Bool("skip-jwt-bearer-tokens", false, "will skip requests that have verified JWT bearer tokens (default false)")
 	flagSet.Bool("force-json-errors", false, "will force JSON errors instead of HTTP error pages or redirects")
 	flagSet.StringSlice("extra-jwt-issuers", []string{}, "if skip-jwt-bearer-tokens is set, a list of extra JWT issuer=audience pairs (where the issuer URL has a .well-known/openid-configuration or a .well-known/jwks.json)")
+
+	//TODO: legacy backward compatibility - remove once migration to sso-v3 is done
+	flagSet.String("token-validation-key", "", "Secret key to be used to decode api token requests")
+	flagSet.String("token-validation-auth-data", "", "Secret signature that will be used to verify token payload")
+	flagSet.StringSlice("token-validation-regex", []string{}, "Bypass regular authentication in favor of API token for requests that match the method & path.")
+	//TODO: legacy backward compatibility - remove once migration to sso-v3 is done
 
 	flagSet.StringSlice("email-domain", []string{}, "authenticate emails with the specified domain (may be given multiple times). Use * to authenticate any email")
 	flagSet.StringSlice("whitelist-domain", []string{}, "allowed domains for redirection after authentication. Prefix domain with a . or a *. to allow subdomains (eg .example.com, *.example.com)")

@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -98,6 +101,12 @@ type OAuthProxy struct {
 	serveMux          *mux.Router
 	redirectValidator redirect.Validator
 	appDirector       redirect.AppDirector
+
+	//TODO: legacy backward compatibility - remove once migration to sso-v3 is done
+	tokenKey      string
+	tokenAuthData string
+	tokenRoutes   []allowedRoute
+	//TODO: legacy backward compatibility - remove once migration to sso-v3 is done
 }
 
 // NewOAuthProxy creates a new instance of OAuthProxy from the options provided
@@ -175,6 +184,11 @@ func NewOAuthProxy(opts *options.Options, validator func(string) bool) (*OAuthPr
 		return nil, err
 	}
 
+	tokenRoutes, err := buildTokenRoutesAllowlist(opts)
+	if err != nil {
+		return nil, err
+	}
+
 	preAuthChain, err := buildPreAuthChain(opts)
 	if err != nil {
 		return nil, fmt.Errorf("could not build pre-auth chain: %v", err)
@@ -219,6 +233,11 @@ func NewOAuthProxy(opts *options.Options, validator func(string) bool) (*OAuthPr
 		upstreamProxy:      upstreamProxy,
 		redirectValidator:  redirectValidator,
 		appDirector:        appDirector,
+		//TODO: legacy backward compatibility - remove once migration to sso-v3 is done
+		tokenKey:      opts.TokenValidationKey,
+		tokenAuthData: opts.TokenValidationAuthData,
+		tokenRoutes:   tokenRoutes,
+		//TODO: legacy backward compatibility - remove once migration to sso-v3 is done
 	}
 	p.buildServeMux(opts.ProxyPrefix)
 
@@ -510,16 +529,80 @@ func (p *OAuthProxy) ErrorPage(rw http.ResponseWriter, req *http.Request, code i
 	})
 }
 
+// buildTokenRoutesAllowlist builds an []allowedRoute  list from either the legacy
+func buildTokenRoutesAllowlist(opts *options.Options) ([]allowedRoute, error) {
+	routes := make([]allowedRoute, 0, len(opts.TokenValidationRegex))
+
+	for _, path := range opts.TokenValidationRegex {
+		compiledRegex, err := regexp.Compile(path)
+		if err != nil {
+			return nil, err
+		}
+		logger.Printf("Setting Token validation - Method: ALL | Path: %s", path)
+		routes = append(routes, allowedRoute{
+			method:    "",
+			pathRegex: compiledRegex,
+		})
+	}
+
+	return routes, nil
+}
+
 // IsAllowedRequest is used to check if auth should be skipped for this request
 func (p *OAuthProxy) IsAllowedRequest(req *http.Request) bool {
 	isPreflightRequestAllowed := p.skipAuthPreflight && req.Method == "OPTIONS"
-	return isPreflightRequestAllowed || p.isAllowedRoute(req) || p.isTrustedIP(req)
+	return isPreflightRequestAllowed || p.isAllowedRoute(req) || p.isTrustedIP(req) || p.isValidAPIToken(req)
 }
 
 // IsAllowedRoute is used to check if the request method & path is allowed without auth
 func (p *OAuthProxy) isAllowedRoute(req *http.Request) bool {
 	for _, route := range p.allowedRoutes {
 		if (route.method == "" || req.Method == route.method) && route.pathRegex.MatchString(req.URL.Path) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsAllowedRoute is used to check if the request method & path is allowed without auth
+func (p *OAuthProxy) isValidAPIToken(req *http.Request) bool {
+	for _, route := range p.tokenRoutes {
+		if (route.method == "" || req.Method == route.method) && route.pathRegex.MatchString(req.URL.Path) {
+
+			authHeader := req.Header.Get("Authorization")
+			if len(authHeader) < 10 {
+				return false
+			}
+
+			hexToken := authHeader[5:]
+			token, err := hex.DecodeString(hexToken)
+
+			c, err := aes.NewCipher([]byte(p.tokenKey))
+			if err != nil {
+				return false
+			}
+
+			gcm, err := cipher.NewGCM(c)
+			if err != nil {
+				return false
+			}
+
+			nonceSize := gcm.NonceSize()
+			if len(token) < nonceSize {
+				return false
+			}
+
+			nonce, cipherText := token[:nonceSize], token[nonceSize:]
+			plaintext, err := gcm.Open(nil, nonce, cipherText, []byte(p.tokenAuthData))
+			if err != nil {
+				return false
+			}
+
+			capiPayload := strings.Split(string(plaintext), ":")
+
+			req.Header.Add("X_CAPI_EMAIL", capiPayload[0])
+			req.Header.Add("X_CAPI_SIGNATURE", capiPayload[1])
+
 			return true
 		}
 	}
