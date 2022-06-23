@@ -566,6 +566,10 @@ func (p *OAuthProxy) isAllowedRoute(req *http.Request) bool {
 
 // IsAllowedRoute is used to check if the request method & path is allowed without auth
 func (p *OAuthProxy) isValidAPIToken(req *http.Request) bool {
+	if strings.Contains(req.Header.Get("Authorization"), "Bearer: ") {
+		logger.Printf("received Bearer token, skipping cnvrg legacy sso-v2 token check")
+		return false
+	}
 	for _, route := range p.tokenRoutes {
 		if (route.method == "" || req.Method == route.method) && route.pathRegex.MatchString(req.URL.Path) {
 
