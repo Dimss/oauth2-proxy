@@ -566,10 +566,19 @@ func (p *OAuthProxy) isAllowedRoute(req *http.Request) bool {
 
 // IsAllowedRoute is used to check if the request method & path is allowed without auth
 func (p *OAuthProxy) isValidAPIToken(req *http.Request) bool {
-	if strings.Contains(req.Header.Get("Authorization"), "Bearer: ") {
+	// If bearer token provided, continue with the regular authentication flow
+	if strings.Contains(req.Header.Get("Authorization"), "Bearer") {
 		logger.Printf("received Bearer token, skipping cnvrg legacy sso-v2 token check")
 		return false
 	}
+	// if CAPI (sso-v2 legacy token) provided, continue with the CAPI authentication flow
+	if strings.Contains(strings.ToLower(req.Header.Get("Authorization")), "capi") {
+		return p.authenticatedByCAPIToken(req)
+	}
+	return false
+}
+
+func (p *OAuthProxy) authenticatedByCAPIToken(req *http.Request) bool {
 	for _, route := range p.tokenRoutes {
 		if (route.method == "" || req.Method == route.method) && route.pathRegex.MatchString(req.URL.Path) {
 
@@ -577,7 +586,8 @@ func (p *OAuthProxy) isValidAPIToken(req *http.Request) bool {
 			if len(authHeader) < 10 {
 				return false
 			}
-
+			// CAPI Token Authorization header example:
+			// CAPI 62667372687774666e796875d2aec614c29527af86f3e5f902abb7c3b00b2aafb38ee683b259e9e09ab418661b4a1956e66d1db714d4eb640a3fac1425b5
 			hexToken := authHeader[5:]
 			token, err := hex.DecodeString(hexToken)
 
@@ -604,8 +614,8 @@ func (p *OAuthProxy) isValidAPIToken(req *http.Request) bool {
 
 			capiPayload := strings.Split(string(plaintext), ":")
 
-			req.Header.Add("X_CAPI_EMAIL", capiPayload[0])
-			req.Header.Add("X_CAPI_SIGNATURE", capiPayload[1])
+			req.Header.Add("CAPI-EMAIL", capiPayload[0])
+			req.Header.Add("CAPI-SIGNATURE", capiPayload[1])
 
 			return true
 		}
