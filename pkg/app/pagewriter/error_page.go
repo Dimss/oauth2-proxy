@@ -1,12 +1,11 @@
 package pagewriter
 
 import (
-	"fmt"
-	"html/template"
-	"net/http"
-
 	middlewareapi "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/middleware"
 	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/logger"
+	"html/template"
+	"net/http"
+	"strings"
 )
 
 // errorMessages are default error messages for each of the different
@@ -110,12 +109,36 @@ func (e *errorPageWriter) getMessage(status int, appError string, messages ...in
 	if e.debug {
 		return appError
 	}
-	if len(messages) > 0 {
-		format := fmt.Sprintf("%v", messages[0])
-		return fmt.Sprintf(format, messages[1:]...)
+	// Motivation for this (quite dirty) change
+	// we (the cnvrg team) need an application level errors
+	// however, the application errors are available only if `--show-debug-on-error` flag is true
+	// this may contain sensitive information, as a result, we can't enable it in production
+	// workaround: our templates will show two different messages
+	// the default one:
+	//
+	// "You didn’t expect this, neither did we. We will email you as soon as we find the problem. Feel free to contact support for further assistance."
+	//
+	//the custom one:
+	//
+	// if appError string contains "Code not valid" we'll show "Session code expired, please sign in again."
+	// if appError string contains "isn't verified" we'll show "Please verify your email before proceeding."
+
+	if strings.Contains(appError, "Code not valid") {
+		return "Session code expired, please sign in again."
+	} else if strings.Contains(appError, "isn't verified") {
+		return "Please verify your email before proceeding."
 	}
-	if msg, ok := errorMessages[status]; ok {
-		return msg
-	}
-	return "Unknown error"
+	return "You didn’t expect this, neither did we. We will email you as soon as we find the problem." +
+		" Feel free to contact support for further assistance."
+
+	// ---------- THIS IS ORIG CODE which will be commented out
+	//if len(messages) > 0 {
+	//	format := fmt.Sprintf("%v", messages[0])
+	//	return fmt.Sprintf(format, messages[1:]...)
+	//}
+	//if msg, ok := errorMessages[status]; ok {
+	//	return msg
+	//}
+	//return "Unknown error"
+	// ---------- END OF THE ORIG CODE
 }
